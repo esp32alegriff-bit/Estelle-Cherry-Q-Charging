@@ -1,15 +1,15 @@
 # Estelle Cherry Q — Charging app
 
-A simple Android home-control app for the **FARRUSCO Cherry Q** relay system.
+A home LAN Android control app for the **FARRUSCO Cherry Q** relay system.
 
 ## Approved design
 
-Dark automotive UI with cherry-pink branding, bright green ON states and bright red OFF states.
+EF_1.2 uses a compact dark automotive dashboard with purple, cyan, green, and red neon states. All navigation and control icons are vectors.
 
 Screens:
 
 - **Home** — clear Eskom and EV relay status
-- **Control** — large individual relay controls plus START/STOP CHARGING
+- **Control** — compact individual relay controls plus START/STOP CHARGING
 - **Settings** — local relay address, local control token, connection test
 - **About** — app/device information
 
@@ -36,16 +36,16 @@ The relay already has working Wi-Fi + OTA + ESP-NOW. Android cannot send ESP-NOW
 
 `docs/relay-api-contract.md`
 
-That API still needs to be added to the relay firmware via OTA. Until then, the app will show the relay as unavailable rather than pretending a command succeeded.
+The relay LAN API is installed and confirmed working. The app continues to use the address and local control token saved on the phone. Updating the app does not replace the saved address, including a working IP such as `http://192.168.1.127`.
 
 ## Build the APK for free
 
-GitHub Actions builds a debug APK on every push to `main`.
+GitHub Actions builds a permanently release-signed APK on every push to `main`. A version tag publishes it as a GitHub Release. See [release signing](docs/release-signing.md).
 
 1. Open the repository **Actions** tab.
-2. Open the latest **Android APK** workflow run.
-3. Download the `Estelle-Cherry-Q-debug-apk` artifact.
-4. Install `app-debug.apk` on the Android phone.
+2. Open the latest **Android APK** workflow run or the EF_1.2 GitHub Release.
+3. Download `Estelle-Cherry-Q-Charging-EF_1.2.apk` from the release.
+4. An existing EF_1.1 debug-signed install may need one uninstall; EF_1.2 and later releases use the same permanent key.
 
 No paid Android tooling is required.
 
@@ -64,4 +64,4 @@ No paid Android tooling is required.
 
 ## Version
 
-`1.0.0`
+`EF_1.2` (versionCode 3)
