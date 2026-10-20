@@ -4,28 +4,12 @@ import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -33,18 +17,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Bg = Color(0xFF020914)
-private val Panel = Color(0xFF071425)
-private val Cyan = Color(0xFF19D7FF)
-private val Blue = Color(0xFF277BFF)
-private val Purple = Color(0xFFB22BFF)
-private val Pink = Color(0xFFFF73D1)
-private val Green = Color(0xFF19F66B)
-private val Red = Color(0xFFFF334A)
-private val TextSoft = Color(0xFFB6C9E8)
-
 internal enum class Tab(val label: String) {
-    Home("Home"), Control("Control"), Settings("Settings"), About("About")
+    Home("Home"), Control("Control"), History("History"), Graphs("Graphs"), Settings("Settings"), Share("Share")
 }
 
 data class RelayStatus(
@@ -57,7 +31,19 @@ data class RelayStatus(
 data class SessionState(
     val startedAt: Long = 0L,
     val endedAt: Long = 0L,
-    val running: Boolean = false
+    val running: Boolean = false,
+    val amps: Double = 13.0,
+    val ratePerKwh: Double = 3.88
+)
+
+data class ChargeRecord(
+    val startedAt: Long,
+    val endedAt: Long,
+    val durationMs: Long,
+    val amps: Double,
+    val ratePerKwh: Double,
+    val estimatedKwh: Double,
+    val estimatedCost: Double
 )
 
 class MainActivity : ComponentActivity() {
@@ -70,23 +56,33 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun EstelleCherryQApp(context: Context) {
     val prefs = remember { context.getSharedPreferences("estelle_cherry_q", Context.MODE_PRIVATE) }
-    var baseUrl by remember { mutableStateOf(prefs.getString("baseUrl", "http://farrusco-cherryq-relay.local") ?: "") }
+    var baseUrl by remember { mutableStateOf(prefs.getString("baseUrl", "http://192.168.1.127") ?: "http://192.168.1.127") }
     var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
+    var ratePerKwh by remember { mutableDoubleStateOf(prefs.getFloat("ratePerKwh", 3.88f).toDouble()) }
+    var chargeAmps by remember { mutableDoubleStateOf(prefs.getFloat("chargeAmps", 13f).toDouble()) }
     var tab by remember { mutableStateOf(Tab.Home) }
     var status by remember { mutableStateOf(RelayStatus()) }
     var busy by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var history by remember { mutableStateOf(loadHistory(prefs.getString("chargeHistory", "[]") ?: "[]")) }
     var session by remember {
         mutableStateOf(
             SessionState(
                 startedAt = prefs.getLong("sessionStartedAt", 0L),
                 endedAt = prefs.getLong("sessionEndedAt", 0L),
-                running = prefs.getBoolean("sessionRunning", false)
+                running = prefs.getBoolean("sessionRunning", false),
+                amps = prefs.getFloat("sessionAmps", chargeAmps.toFloat()).toDouble(),
+                ratePerKwh = prefs.getFloat("sessionRate", ratePerKwh.toFloat()).toDouble()
             )
         )
     }
     var previousRelay2 by remember { mutableStateOf<Boolean?>(null) }
     val scope = rememberCoroutineScope()
+
+    fun persistHistory(records: List<ChargeRecord>) {
+        history = records
+        prefs.edit().putString("chargeHistory", historyToJson(records)).apply()
+    }
 
     fun saveSession(s: SessionState) {
         session = s
@@ -94,7 +90,26 @@ private fun EstelleCherryQApp(context: Context) {
             .putLong("sessionStartedAt", s.startedAt)
             .putLong("sessionEndedAt", s.endedAt)
             .putBoolean("sessionRunning", s.running)
+            .putFloat("sessionAmps", s.amps.toFloat())
+            .putFloat("sessionRate", s.ratePerKwh.toFloat())
             .apply()
+    }
+
+    fun finishSession(endTime: Long) {
+        if (!session.running || session.startedAt <= 0L) return
+        val duration = (endTime - session.startedAt).coerceAtLeast(0L)
+        val kwh = estimateKwh(duration, session.amps)
+        val record = ChargeRecord(
+            startedAt = session.startedAt,
+            endedAt = endTime,
+            durationMs = duration,
+            amps = session.amps,
+            ratePerKwh = session.ratePerKwh,
+            estimatedKwh = kwh,
+            estimatedCost = kwh * session.ratePerKwh
+        )
+        persistHistory((history + record).takeLast(1000))
+        saveSession(session.copy(endedAt = endTime, running = false))
     }
 
     fun api() = RelayApi(baseUrl.trimEnd('/'), token)
@@ -132,51 +147,113 @@ private fun EstelleCherryQApp(context: Context) {
         if (previous == null) {
             previousRelay2 = status.relay2On
             if (status.relay2On && !session.running) {
-                saveSession(SessionState(System.currentTimeMillis(), 0L, true))
+                saveSession(SessionState(System.currentTimeMillis(), 0L, true, chargeAmps, ratePerKwh))
+            } else if (!status.relay2On && session.running) {
+                finishSession(System.currentTimeMillis())
             }
             return@LaunchedEffect
         }
         if (!previous && status.relay2On) {
-            saveSession(SessionState(System.currentTimeMillis(), 0L, true))
+            saveSession(SessionState(System.currentTimeMillis(), 0L, true, chargeAmps, ratePerKwh))
         } else if (previous && !status.relay2On && session.running) {
-            saveSession(session.copy(endedAt = System.currentTimeMillis(), running = false))
+            finishSession(System.currentTimeMillis())
         }
         previousRelay2 = status.relay2On
     }
 
     NeonAppShell(
+        context = context,
         tab = tab,
         onTab = { tab = it },
         status = status,
         session = session,
+        history = history,
         now = now,
         busy = busy,
         baseUrl = baseUrl,
         token = token,
+        ratePerKwh = ratePerKwh,
+        chargeAmps = chargeAmps,
         onRefresh = ::refresh,
         onRelay1 = { on -> runAction { setRelay(1, on) } },
         onRelay2 = { on -> runAction { setRelay(2, on) } },
         onStart = { runAction { startCharging() } },
         onStop = { runAction { stopCharging() } },
-        onSave = { u, t ->
+        onSave = { u, t, rate, amps ->
             baseUrl = u.trim()
             token = t
-            prefs.edit().putString("baseUrl", baseUrl).putString("token", token).apply()
+            ratePerKwh = rate.coerceAtLeast(0.0)
+            chargeAmps = amps.coerceAtLeast(0.0)
+            prefs.edit()
+                .putString("baseUrl", baseUrl)
+                .putString("token", token)
+                .putFloat("ratePerKwh", ratePerKwh.toFloat())
+                .putFloat("chargeAmps", chargeAmps.toFloat())
+                .apply()
             refresh()
-        }
+        },
+        onShare = { shareHistoryPdf(context, history, ratePerKwh, chargeAmps) }
     )
 }
 
 internal fun timeText(epoch: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epoch))
+internal fun dateTimeText(epoch: Long): String = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epoch))
 
 internal fun elapsedText(session: SessionState, now: Long): String {
     if (session.startedAt <= 0L) return "00:00:00"
     val end = if (session.running) now else if (session.endedAt > 0L) session.endedAt else now
-    val total = ((end - session.startedAt).coerceAtLeast(0L) / 1000L)
+    return durationText((end - session.startedAt).coerceAtLeast(0L))
+}
+
+internal fun durationText(durationMs: Long): String {
+    val total = durationMs.coerceAtLeast(0L) / 1000L
     val h = total / 3600
     val m = (total % 3600) / 60
     val s = total % 60
     return String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
+}
+
+internal fun estimateKwh(durationMs: Long, amps: Double): Double {
+    val hours = durationMs.coerceAtLeast(0L) / 3_600_000.0
+    return (230.0 * amps / 1000.0) * hours
+}
+
+private fun historyToJson(records: List<ChargeRecord>): String {
+    val array = JSONArray()
+    records.forEach { r ->
+        array.put(JSONObject().apply {
+            put("startedAt", r.startedAt)
+            put("endedAt", r.endedAt)
+            put("durationMs", r.durationMs)
+            put("amps", r.amps)
+            put("ratePerKwh", r.ratePerKwh)
+            put("estimatedKwh", r.estimatedKwh)
+            put("estimatedCost", r.estimatedCost)
+        })
+    }
+    return array.toString()
+}
+
+private fun loadHistory(raw: String): List<ChargeRecord> = try {
+    val array = JSONArray(raw)
+    buildList {
+        for (i in 0 until array.length()) {
+            val o = array.getJSONObject(i)
+            add(
+                ChargeRecord(
+                    startedAt = o.optLong("startedAt"),
+                    endedAt = o.optLong("endedAt"),
+                    durationMs = o.optLong("durationMs"),
+                    amps = o.optDouble("amps", 13.0),
+                    ratePerKwh = o.optDouble("ratePerKwh", 3.88),
+                    estimatedKwh = o.optDouble("estimatedKwh", 0.0),
+                    estimatedCost = o.optDouble("estimatedCost", 0.0)
+                )
+            )
+        }
+    }
+} catch (_: Exception) {
+    emptyList()
 }
 
 private class RelayApi(private val baseUrl: String, private val token: String) {
