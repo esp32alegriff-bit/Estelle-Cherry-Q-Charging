@@ -14,8 +14,8 @@ android {
         applicationId = "za.co.farrusco.estellecherryq"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "EF_1.2"
+        versionCode = 4
+        versionName = "EF_1.3"
     }
 
     compileOptions {
