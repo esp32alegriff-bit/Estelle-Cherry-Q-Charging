@@ -36,18 +36,18 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Estelle-Cherry-Q-debug-apk
+          name: Estelle-Cherry-Q-EF_1.1
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
       - name: Prepare public APK
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: cp app/build/outputs/apk/debug/app-debug.apk Estelle-Cherry-Q-Charging-v1.0.0.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Estelle-Cherry-Q-Charging-EF_1.1.apk
 
-      - name: Publish public APK release
+      - name: Publish EF_1.1 release
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view v1.0.0 >/dev/null 2>&1 ||             gh release create v1.0.0               --title "Estelle Cherry Q Charging v1.0.0"               --notes "Android home-control app for the FARRUSCO Cherry Q relay system."
-          gh release upload v1.0.0 Estelle-Cherry-Q-Charging-v1.0.0.apk --clobber
+          gh release view EF_1.1 >/dev/null 2>&1 ||             gh release create EF_1.1               --title "Estelle Cherry Q Charging EF_1.1"               --notes "Approved neon UI update with charging session Started, Current time, Elapsed, and Ended fields."
+          gh release upload EF_1.1 Estelle-Cherry-Q-Charging-EF_1.1.apk --clobber
