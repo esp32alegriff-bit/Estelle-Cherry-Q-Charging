@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -33,9 +33,21 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Estelle-Cherry-Q-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Prepare public APK
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: cp app/build/outputs/apk/debug/app-debug.apk Estelle-Cherry-Q-Charging-v1.0.0.apk
+
+      - name: Publish public APK release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v1.0.0 >/dev/null 2>&1 ||             gh release create v1.0.0               --title "Estelle Cherry Q Charging v1.0.0"               --notes "Android home-control app for the FARRUSCO Cherry Q relay system."
+          gh release upload v1.0.0 Estelle-Cherry-Q-Charging-v1.0.0.apk --clobber
